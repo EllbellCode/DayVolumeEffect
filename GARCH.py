@@ -23,46 +23,52 @@ print('ADF Statistic:', result[0])
 print('p-value:', result[1])
 print('Number of lags used:', result[2])
 
-# CODE FOR MODELLING VOLATILITY DIRECT
+# # CODE FOR MODELLING VOLATILITY DIRECT
 
-model = arch_model(train["Log Returns"], vol='GARCH', p=1, q=1, x=train[['Vol_Norm']], mean='ARX')
+# model = arch_model(train["Log Returns"], vol='GARCH', p=1, q=1, x=train[['Vol_Norm']], mean='ARX')
 
-residuals = model.fit()
+# residuals = model.fit()
 
-print(residuals)
+# print(residuals)
 
-cond_vol = residuals.conditional_volatility
+# cond_vol = residuals.conditional_volatility
 
-regressors_c = sm.add_constant(regressors)
+# regressors_c = sm.add_constant(regressors)
 
-vol_model = sm.OLS(cond_vol, regressors_c).fit()
+# vol_model = sm.OLS(cond_vol, regressors_c).fit()
 
-# Show summary
-print(vol_model.summary())
+# # Show summary
+# print(vol_model.summary())
 
-train['Volatility'] = cond_vol
-train['Day'] = pd.to_datetime(train['Date']).dt.day_name()
+# train['Volatility'] = cond_vol
+# train['Day'] = pd.to_datetime(train['Date']).dt.day_name()
 
-train.groupby('Day')['Vol_Norm'].mean().reindex([
-    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
-]).plot(kind='bar', title='Average Conditional Volatility by Day')
-plt.ylabel('Volatility')
-plt.show()
+# train.groupby('Day')['Vol_Norm'].mean().reindex([
+#     'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
+# ]).plot(kind='bar', title='Average Conditional Volatility by Day')
+# plt.ylabel('Volatility')
+# plt.show()
 
 #ORIGINAL CODE
 
-#g_model = arch_model(train["Change %"], vol='GARCH', p=1, q=1, mean='ARX', x=regressors)
+g_model = arch_model(train["Log Returns"], vol='GARCH', p=1, q=1)
 
-#g_model_fit = g_model.fit()
+g_model_fit = g_model.fit()
 
-#eg_model = arch_model(train["Change %"], vol='EGARCH', p=1, q=1, x=train['Vol.'])
-#eg_model_fit = eg_model.fit()
+eg_model = arch_model(train["Log Returns"], vol='EGARCH', p=1, q=1)
+eg_model_fit = eg_model.fit()
 
-# Print the summary of the model
-#print(g_model_fit.summary())
-#print(eg_model_fit.summary())
+#Print the summary of the model
+print(g_model_fit.summary())
+print(eg_model_fit.summary())
 
+garch_vol = g_model_fit.conditional_volatility
 
+# plt.figure(figsize=(12, 6))
+# plt.plot(train['Date'], train['Log Returns'])
+# plt.plot(train['Date'], garch_vol)
+# plt.legend()
+# plt.show()
 
 # predicted = len(test)
 # # Generate forecasts
@@ -82,11 +88,13 @@ plt.show()
 # # Display the results
 # print(results)
 
-# # Optionally, you can visualize the results
+# Optionally, you can visualize the results
 
 # plt.figure(figsize=(12, 6))
 # plt.plot(results['Actual'], label='Actual Returns', color='blue')
 # plt.plot(results['Predicted'], label='Predicted Returns', color='orange')
 # plt.title('Actual vs Predicted Returns')
+# plt.figure(figsize=(12, 6))
+# plt.plot(train['Date'], train['Log Returns'])
 # plt.legend()
 # plt.show()
