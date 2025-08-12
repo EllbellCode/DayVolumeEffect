@@ -1,0 +1,7 @@
+source_coin,source_var,target_coin,target_var,lag,F-test p-value
+BNB,VolLogChange,BNB,Parkinson,1,0.0004445458789629321
+BNB,VolLogChange,BNB,Log Returns,1,0.01889197264518275
+BTC,VolLogChange,BTC,Parkinson,1,3.009011777065972e-09
+ETH,VolLogChange,ETH,Parkinson,1,6.389078552070808e-08
+XRP,VolLogChange,XRP,Parkinson,1,9.668362003925009e-10
+XRP,VolLogChange,XRP,Log Returns,1,1.4012813236465788e-05

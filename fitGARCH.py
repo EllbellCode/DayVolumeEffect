@@ -16,13 +16,6 @@ test = returns[returns['Date'] > '2023-12-31']
 train = train.dropna()
 regressors = train[['Vol_Norm', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']]
 
-result = adfuller(train['Log Returns'])
-
-# Print results
-print('ADF Statistic:', result[0])
-print('p-value:', result[1])
-print('Number of lags used:', result[2])
-
 # # CODE FOR MODELLING VOLATILITY DIRECT
 
 # model = arch_model(train["Log Returns"], vol='GARCH', p=1, q=1, x=train[['Vol_Norm']], mean='ARX')

@@ -27,14 +27,14 @@ def standardize(data_dir):
             df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
 
         # Clean numeric columns
-        for col in ['Price', 'Open', 'High', 'Low']:
+        for col in ['Close', 'Open', 'High', 'Low']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.replace(',', '', regex=False).astype(float)
 
         # Handle Volume
         if 'Vol.' in df.columns:
-            df['Vol.'] = df['Vol.'].apply(convertVol)
-            df['Vol.'] = df['Vol.'].fillna(999_999_999_999).round()
+            df['Volume'] = df['Volume'].apply(convertVol)
+            df['Volume'] = df['Volume'].fillna(999_999_999_999).round()
 
         # Save
         out_path = output_dir / f"Verif_{file.name}"
@@ -65,11 +65,11 @@ def interpolate(missing_dict, data_dir):
             if not before.empty and not after.empty:
                 new_row = {
                     'Date': miss_dt,
-                    'Price': (before['Price'].values[0] + after['Price'].values[0]) / 2,
+                    'Close': (before['Close'].values[0] + after['Close'].values[0]) / 2,
                     'Open': (before['Open'].values[0] + after['Open'].values[0]) / 2,
                     'High': (before['High'].values[0] + after['High'].values[0]) / 2,
                     'Low': (before['Low'].values[0] + after['Low'].values[0]) / 2,
-                    'Vol.': (before['Vol.'].values[0] + after['Vol.'].values[0]) / 2
+                    'Volume': (before['Volume'].values[0] + after['Volume'].values[0]) / 2
                 }
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 print(f"Interpolated: {miss_date} in {file_name}")
@@ -85,10 +85,11 @@ def calcReturns(data_dir):
 
         df = pd.read_csv(file)
 
-        if 'Price' in df.columns:
-
-            df['Returns'] = df['Price'].pct_change(periods=-1) * 100
-            df['Log Returns'] = np.log(df['Price'] / df['Price'].shift(-1))
+        if 'Close' in df.columns:
+            
+            #Backwards order as we sort the date at the end!
+            df['Returns'] = df['Close'] / df['Close'].shift(-1) - 1
+            df['Log Returns'] = np.log(df['Close'] / df['Close'].shift(-1))
             df.to_csv(file, index=False)
 
 def addDays(data_dir):
@@ -107,6 +108,8 @@ def addDays(data_dir):
         for day in days:
             df[day] = (df['Day'] == day).astype(int)
 
+        df['Weekend'] = df['Day'].isin(['Saturday', 'Sunday']).astype(int)
+
         df.to_csv(file, index=False)
 
 def volNorm(data_dir):
@@ -117,9 +120,27 @@ def volNorm(data_dir):
 
         df = pd.read_csv(file)
 
-        df['Vol_Norm'] = (df['Vol.'] - df['Vol.'].mean()) / df['Vol.'].std()
+        df['VolChange'] = df['Volume'] / df['Volume'].shift(-1) - 1
+        df['VolLogChange'] = np.log(df['Volume'] / df['Volume'].shift(-1))
 
+        df = df.sort_values("Date", ascending=True)
         df.to_csv(file, index=False)
+
+def addVolatility(data_dir):
+
+    data_dir = Path(data_dir)
+
+    for file in data_dir.glob("*.csv"):
+
+        df = pd.read_csv(file)
+
+        df['Parkinson'] = np.sqrt((1 / (4 * np.log(2))) * (np.log(df['High'] / df['Low']) ** 2))
+        df['GarmanKlass'] = np.sqrt(0.5 * (np.log(df['High'] / df['Low']) ** 2) - (2 * np.log(2) - 1) * (np.log(df['Close'] / df['Open']) ** 2))
+
+        df = df.sort_values("Date", ascending=True)
+        df.to_csv(file, index=False)
+
+
 
 
 
@@ -128,7 +149,6 @@ def main():
     data_folder = Path("Data")
     verif_folder = data_folder / "Verified"
     start_date = '2020-01-01'
-    start_date_sol = '2020-07-21'
     end_date = '2025-01-01'
     missing_dates_dict = {}
 
@@ -136,7 +156,12 @@ def main():
 
     for file in verif_folder.glob("*.csv"):
         df = pd.read_csv(file)
-        start = start_date_sol if file.name == "Verif_SOL.csv" else start_date
+
+        df = df.rename(columns={'Start': 'Date'})
+        df = df.drop('End', axis=1)
+        df.to_csv(file, index=False)
+
+        start = start_date
         missing = checkMissing(df, start, end_date)
         if missing:
             missing_dates_dict[file.name] = missing
@@ -147,6 +172,7 @@ def main():
     calcReturns(verif_folder)
     addDays(verif_folder)
     volNorm(verif_folder)
+    addVolatility(verif_folder)
 
 if __name__ == "__main__":
     main()
