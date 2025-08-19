@@ -5,16 +5,32 @@ from itertools import product
 from scipy.special import betaln
 from sklearn.preprocessing import StandardScaler
 
-# ----------------------------
-# Kernels & utilities
-# ----------------------------
-def _gaussian_weights(query, samples, h):
-    """
-    Gaussian kernel weights for each row in `query` vs all rows in `samples`.
-    query:  (Q, d)
-    samples:(N, d)
-    returns: (Q, N) weights (unnormalized)
-    """
+
+data_dir = Path("Data/Verified")
+files = list(data_dir.glob("*.csv"))
+
+volatility = "RV"
+source_coins = ["DAI", "USDC", "USDT"]
+source_vars  = [volatility, "VolLogChange"]
+target_coins = ["BNB", "BTC", "ETH", "XRP"]
+target_vars  = [volatility, "Log Returns"]
+n_boot = 200
+max_lag = 1
+
+coin_data = {}
+for file in files:
+    coin_name = file.stem.replace("Verif_", "")
+    df = pd.read_csv(file).sort_values("Date").dropna(subset=["Log Returns", "VolLogChange", volatility])
+    train = df[(df['Date'] >= '2020-01-01') & (df['Date'] <= '2023-12-31')]
+    coin_data[coin_name] = train
+
+"""
+Gaussian Kernel Weights
+
+Returned weights are unnormalised
+"""
+def kernelWeights(query, samples, h):
+    
     # squared L2 distance: ||q - s||^2 = |q|^2 + |s|^2 - 2 q.s
     q2 = np.sum(query**2, axis=1, keepdims=True)        # (Q,1)
     s2 = np.sum(samples**2, axis=1, keepdims=True).T    # (1,N)
@@ -23,28 +39,27 @@ def _gaussian_weights(query, samples, h):
     w = np.exp(-0.5 * dist2 / (h**2))
     return w
 
-def _select_bandwidth(z, d):
-    """
-    Scalar bandwidth for Gaussian kernel after standardization.
-    Uses a rule-of-thumb ~ n^{-1/(d+4)}.
-    """
+
+"""
+Calculating Kernel bandwidth using Silvermans Rule
+"""
+def calcBandwidth(z, d):
     n = z.shape[0]
     return np.power(max(n, 2), -1.0 / (d + 4.0))
 
-# ----------------------------
-# Conditional kernel CDFs
-# ----------------------------
-def conditional_cdf_F_y_next_given_y_lags(y_next, y_lags, h, query_y_next=None, query_y_lags=None):
-    """
-    Estimates F(y_{t+1} | y_t^n) at observed points (default) or provided queries.
-    y_next: (T,)
-    y_lags: (T, n_lag)
-    """
+
+"""
+Estimates the Conditional Marginal Distribution F(y_{t+1} | y_t^n)
+
+Uses Kernel Density Estimation
+"""
+def yCMD(y_next, y_lags, h, query_y_next=None, query_y_lags=None):
+    
     T, d = y_lags.shape
     if query_y_lags is None:
         query_y_lags = y_lags
         query_y_next = y_next
-    W = _gaussian_weights(query_y_lags, y_lags, h)           # (Q,T)
+    W = kernelWeights(query_y_lags, y_lags, h)           # (Q,T)
     W_sum = W.sum(axis=1, keepdims=True) + 1e-12
     indicators = (y_next[None, :] <= query_y_next[:, None])  # (Q,T)
     num = (W * indicators).sum(axis=1, keepdims=True)
@@ -53,23 +68,22 @@ def conditional_cdf_F_y_next_given_y_lags(y_next, y_lags, h, query_y_next=None, 
     eps = 1e-6
     return np.clip(F, eps, 1.0 - eps)
 
-def conditional_cdf_G_x_lags_given_y_lags(x_lags, y_lags, h, query_x_lags=None, query_y_lags=None):
-    """
-    Estimates G(x_t^m | y_t^n) as a multivariate CDF: P(X^m <= x^m | y^n),
-    using a kernel on y_lags and componentwise <= for X.
-    x_lags: (T, m)
-    y_lags: (T, n)
-    """
+"""
+Estimates the Conditional Marginal Distribution G(x_t^m | y_t^n)
+
+Uses Kernel Density Estimation
+"""
+def xCMD(x_lags, y_lags, h, query_x_lags=None, query_y_lags=None):
+    
     T, m = x_lags.shape
     if query_y_lags is None:
         query_y_lags = y_lags
         query_x_lags = x_lags
 
-    W = _gaussian_weights(query_y_lags, y_lags, h)          # (Q,T)
+    W = kernelWeights(query_y_lags, y_lags, h)          # (Q,T)
     W_sum = W.sum(axis=1, keepdims=True) + 1e-12
 
     # For each query q, indicator_i = 1[ x_i^m <= x_q^m (componentwise) ]
-    # Vectorized trick: for each dimension, build (Q,T) indicator and take product along dim
     Q = query_x_lags.shape[0]
     ind = np.ones((Q, T), dtype=bool)
     for j in range(m):
@@ -80,15 +94,14 @@ def conditional_cdf_G_x_lags_given_y_lags(x_lags, y_lags, h, query_x_lags=None, 
     eps = 1e-6
     return np.clip(G, eps, 1.0 - eps)
 
-# ----------------------------
-# Bernstein (beta-mixture) copula density
-# ----------------------------
-def _beta_pdf_grid(points, m):
-    """
-    Returns matrix B of shape (len(points), m) where
-    B[t, i] = BetaPDF(points[t]; alpha=i, beta=m-i+1)  for i in 1..m.
-    Uses log-Beta for stability.
-    """
+
+"""
+Computes the grid of Beta Densities for Bernstein Approximation
+
+Uses log Beta for stability
+"""
+def betaGrid(points, m):
+    
     points = np.clip(points, 1e-6, 1 - 1e-6)
     T = len(points)
     i = np.arange(1, m + 1)
@@ -100,12 +113,14 @@ def _beta_pdf_grid(points, m):
     log_pdf = (alpha - 1) * np.log(points[:, None]) + (beta - 1) * np.log(1 - points[:, None]) + log_norm
     return np.exp(log_pdf)             # (T,m)
 
-def bernstein_copula_density(u, v, m=10):
-    """
-    Estimate copula density c(u,v) on (0,1)^2 by a Bernstein density estimator:
-      c(u,v) = sum_{i=1}^m sum_{j=1}^m w_ij * Beta_i(u) * Beta_j(v)
+"""
+Estimate Copula Density using Bernstein Approximation
+
+c(u,v) = sum_{i=1}^m sum_{j=1}^m w_ij * Beta_i(u) * Beta_j(v)
     where w_ij are 2D histogram frequencies of (u,v) on an m×m grid.
-    """
+"""
+def calcBernstein(u, v, m=10):
+    
     u = np.clip(np.asarray(u), 1e-6, 1 - 1e-6)
     v = np.clip(np.asarray(v), 1e-6, 1 - 1e-6)
     T = len(u)
@@ -119,8 +134,8 @@ def bernstein_copula_density(u, v, m=10):
         W[ui[k], vi[k]] += 1.0
     W /= max(T, 1)
 
-    Bu = _beta_pdf_grid(u, m)  # (T,m)
-    Bv = _beta_pdf_grid(v, m)  # (T,m)
+    Bu = betaGrid(u, m)  # (T,m)
+    Bv = betaGrid(v, m)  # (T,m)
 
     # density_t = Bu[t,:] @ W @ Bv[t,:]^T
     # Compute efficiently for all t
@@ -128,16 +143,15 @@ def bernstein_copula_density(u, v, m=10):
     dens = np.einsum('tm,tm->t', mid, Bv)  # (T,)
     return np.clip(dens, 1e-12, None)
 
-# ----------------------------
-# GC estimator using the proper conditional PITs and Bernstein density
-# ----------------------------
-def copula_gc_proper(x, y, lag=1, m_bern=10, h=None):
-    """
-    Computes GC(x -> y) using:
+
+"""
+Calculates the Granger Causality using the Bernstein Approximated copula density
       1) conditional kernel CDFs to get u = F(y_{t+1}|y_lags), v = G(x_lags|y_lags)
       2) Bernstein copula density estimator c(u,v)
       3) GC = mean(log c(u,v))
-    """
+"""
+def calcGC(x, y, lag=1, m_bern=10, h=None):
+    
     x = np.asarray(x)
     y = np.asarray(y)
     valid = (~np.isnan(x)) & (~np.isnan(y))
@@ -157,29 +171,24 @@ def copula_gc_proper(x, y, lag=1, m_bern=10, h=None):
     y_lags_std = scaler_y.transform(y_lags)
 
     d = y_lags_std.shape[1]
-    h = _select_bandwidth(y_lags_std, d) if h is None else float(h)
+    h = calcBandwidth(y_lags_std, d) if h is None else float(h)
 
     # conditional PITs
-    u = conditional_cdf_F_y_next_given_y_lags(y_next, y_lags_std, h)
-    v = conditional_cdf_G_x_lags_given_y_lags(x_lags, y_lags_std, h)
+    u = yCMD(y_next, y_lags_std, h)
+    v = xCMD(x_lags, y_lags_std, h)
 
     # copula density & GC
-    c_hat = bernstein_copula_density(u, v, m=m_bern)
+    c_hat = calcBernstein(u, v, m=m_bern)
     gc = float(np.mean(np.log(c_hat)))
     return gc
 
-# ----------------------------
-# Sequence-length bootstrap under H0 (no x -> y)
-# ----------------------------
-def bootstrap_gc_null(x, y, lag=1, n_boot=200, m_bern=10, h=None, random_state=None):
-    """
-    Builds null distribution by generating a full bootstrap sample of size T per replicate:
-      - sample y_lags* from empirical y_lags
-      - draw y_next* ~ F_hat(. | y_lags*)
-      - draw x_lags* ~ G_hat(. | y_lags*)  (independent of y_next* given y_lags*)
-      - compute GC on bootstrap sample (re-estimate everything inside)
-    Returns: (n_boot,) array of GC statistics under H0.
-    """
+"""
+Uses Bootstrapping to generate n_boot synthetic datasets
+Computes GC for each dataset and builds null distribution
+Returns (n_boot,) array of GC statistics to form null distribution.
+"""
+def bootstrapGC(x, y, lag=1, n_boot=200, m_bern=10, h=None, random_state=None):
+    
     rng = np.random.default_rng(random_state)
     x = np.asarray(x)
     y = np.asarray(y)
@@ -198,12 +207,12 @@ def bootstrap_gc_null(x, y, lag=1, n_boot=200, m_bern=10, h=None, random_state=N
     scaler_y = StandardScaler().fit(y_lags)
     y_lags_std = scaler_y.transform(y_lags)
     d = y_lags_std.shape[1]
-    h = _select_bandwidth(y_lags_std, d) if h is None else float(h)
+    h = calcBandwidth(y_lags_std, d) if h is None else float(h)
 
     # Precompute weights between any query and the original sample via a function
     def draw_y_next_given(y_lag_q_std):
         # weights vs all observed y_lags
-        w = _gaussian_weights(y_lag_q_std[None, :], y_lags_std, h).ravel()
+        w = kernelWeights(y_lag_q_std[None, :], y_lags_std, h).ravel()
         if not np.any(w):  # safety
             w = np.ones_like(w)
         w /= w.sum()
@@ -212,7 +221,7 @@ def bootstrap_gc_null(x, y, lag=1, n_boot=200, m_bern=10, h=None, random_state=N
         return y_next[idx][0]
 
     def draw_x_lags_given(y_lag_q_std):
-        w = _gaussian_weights(y_lag_q_std[None, :], y_lags_std, h).ravel()
+        w = kernelWeights(y_lag_q_std[None, :], y_lags_std, h).ravel()
         if not np.any(w):
             w = np.ones_like(w)
         w /= w.sum()
@@ -236,7 +245,7 @@ def bootstrap_gc_null(x, y, lag=1, n_boot=200, m_bern=10, h=None, random_state=N
         x_star = np.concatenate([x[:lag], x_lags_star[:, 0]])  # initial lag + first component of x_lags_star
 
         # Step 4: Compute GC on bootstrap sample
-        gc_null[b] = copula_gc_proper(
+        gc_null[b] = calcGC(
             x_star,
             y_star,
             lag=lag,
@@ -246,10 +255,11 @@ def bootstrap_gc_null(x, y, lag=1, n_boot=200, m_bern=10, h=None, random_state=N
 
     return gc_null
 
-# ----------------------------
-# Pipeline example (loop unchanged except it calls the new fns)
-# ----------------------------
-def run_gc_matrix(coin_data, source_coins, source_vars, target_coins, target_vars, max_lag=1, n_boot=200, m_bern=10, bw=None, seed=42):
+
+"""
+Runs the Copula Granger Causality on our data
+"""
+def runCGC(coin_data, source_coins, source_vars, target_coins, target_vars, max_lag=1, n_boot=200, m_bern=10, bw=None, seed=42):
     results = []
     for coin_x, var_x, coin_y, var_y in product(source_coins, source_vars, target_coins, target_vars):
         print(f"Processing {coin_x}-{var_x} -> {coin_y}-{var_y}")
@@ -258,8 +268,8 @@ def run_gc_matrix(coin_data, source_coins, source_vars, target_coins, target_var
         min_len = min(len(x), len(y))
         x, y = x[-min_len:], y[-min_len:]
         if len(x) > max_lag + 1:
-            gc = copula_gc_proper(x, y, lag=max_lag, m_bern=m_bern, h=bw)
-            null_dist = bootstrap_gc_null(x, y, lag=max_lag, n_boot=n_boot, m_bern=m_bern, h=bw, random_state=seed)
+            gc = calcGC(x, y, lag=max_lag, m_bern=m_bern, h=bw)
+            null_dist = bootstrapGC(x, y, lag=max_lag, n_boot=n_boot, m_bern=m_bern, h=bw, random_state=seed)
             p_value = np.mean(null_dist >= gc)
             results.append({
                 "source_coin": coin_x,
@@ -273,25 +283,8 @@ def run_gc_matrix(coin_data, source_coins, source_vars, target_coins, target_var
             print(f"GC={gc:.6f}, p-value={p_value:.4f}")
     return pd.DataFrame(results)
 
-data_dir = Path("Data/Verified")
-files = list(data_dir.glob("*.csv"))
 
-volatility = "RV"
-source_coins = ["DAI", "USDC", "USDT"]
-source_vars  = [volatility, "VolLogChange"]
-target_coins = ["BNB", "BTC", "ETH", "XRP"]
-target_vars  = [volatility, "Log Returns"]
-n_boot = 200
-max_lag = 1
-
-coin_data = {}
-for file in files:
-    coin_name = file.stem.replace("Verif_", "")
-    df = pd.read_csv(file).sort_values("Date").dropna(subset=["Log Returns", "VolLogChange", volatility])
-    train = df[(df['Date'] >= '2020-01-01') & (df['Date'] <= '2023-12-31')]
-    coin_data[coin_name] = train
-
-results_df = run_gc_matrix(
+results_df = runCGC(
     coin_data, source_coins, source_vars, target_coins, target_vars,
     max_lag=max_lag, n_boot=n_boot, m_bern=10, bw=None, seed=123
 )
