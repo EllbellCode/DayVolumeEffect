@@ -136,13 +136,11 @@ def addVolatility(data_dir):
 
         df['Parkinson'] = np.sqrt((1 / (4 * np.log(2))) * (np.log(df['High'] / df['Low']) ** 2))
         df['GarmanKlass'] = np.sqrt(0.5 * (np.log(df['High'] / df['Low']) ** 2) - (2 * np.log(2) - 1) * (np.log(df['Close'] / df['Open']) ** 2))
+        df['RV'] = np.sqrt((df['Log Returns']**2).rolling(30).sum()) / np.sqrt(30)
+        df['Log RV'] = np.log(df['RV'])
 
         df = df.sort_values("Date", ascending=True)
         df.to_csv(file, index=False)
-
-
-
-
 
 def main():
 

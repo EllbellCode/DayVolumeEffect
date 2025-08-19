@@ -3,7 +3,6 @@ import glob
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from arch import arch_model
 
 folder_path = 'Data/Verified'  
 csv_files = glob.glob(os.path.join(folder_path, '*.csv'))
@@ -14,18 +13,12 @@ axes = axes.flatten()  # flatten 2D array for easy iteration
 colours = plt.get_cmap('rainbow')
 
 for i, (ax, file) in enumerate(zip(axes, csv_files)):
-
-    print(file)
     data = pd.read_csv(file)
     data['Date'] = pd.to_datetime(data['Date'])
 
     colour = colours(i / len(csv_files))
 
-    base_model = arch_model(data['Log Returns'].dropna(), vol='GARCH', p=1, q=1, mean='Constant')
-    res = base_model.fit(disp='off')
-    data['cond_var'] = res.conditional_volatility
-
-    ax.plot(data['Date'], data['cond_var'], color=colour, label='Conditional Volatility')
+    ax.plot(data['Date'], data['RV'], color=colour, label='Realized Volatility')
 
     # Extract ticker from filename
     basename = os.path.basename(file)          
@@ -33,7 +26,7 @@ for i, (ax, file) in enumerate(zip(axes, csv_files)):
     ticker = ticker.replace('.csv', '')   
 
     ax.set_title(ticker)
-    ax.set_ylabel('Conditional Volatility')
+    ax.set_ylabel('Realized Volatility')
 
     # Date formatting
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))

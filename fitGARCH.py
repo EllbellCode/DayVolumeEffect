@@ -7,15 +7,13 @@ import statsmodels.api as sm
 
 data = pd.read_csv('Data/Verified/Verif_BTC.csv')
 #No Sunday to avoid dummy variable trap!
-returns = data[["Date", "Vol_Norm", 'Log Returns', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']] 
+returns = data[["Date", 'Log Returns', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']] 
 
 
 
 train = returns[(returns['Date'] >= '2020-01-01') & (returns['Date'] <= '2023-12-31')]
 test = returns[returns['Date'] > '2023-12-31']
 train = train.dropna()
-regressors = train[['Vol_Norm', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']]
-
 # # CODE FOR MODELLING VOLATILITY DIRECT
 
 # model = arch_model(train["Log Returns"], vol='GARCH', p=1, q=1, x=train[['Vol_Norm']], mean='ARX')

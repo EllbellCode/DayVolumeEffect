@@ -6,7 +6,7 @@ import itertools
 # === Step 1: Load data ===
 data_dir = Path("Data/Verified")
 files = list(data_dir.glob("*.csv"))
-volatility = "Parkinson"
+volatility = "RV"
 max_lag = 1
 
 coin_data = {}
@@ -69,13 +69,4 @@ sig_results = results_df[(results_df["F-test p-value"] < 0.05) &
                          (results_df["source_var"].isin(["VolLogChange", volatility])) &
                          (results_df["target_var"].isin(["Log Returns", volatility]))
                          ]
-sig_results.to_csv("granger_sig_pairs.csv", index=False)
-
-vol_results = results_df[(results_df["F-test p-value"] < 0.05) & 
-                         (results_df["source_coin"].isin(["BTC", "ETH", "XRP", "BNB"])) &
-                         (results_df["target_coin"].isin(["BTC", "ETH", "XRP", "BNB"])) &
-                         (results_df["source_var"] == "VolLogChange") &
-                         (results_df["source_coin"] == results_df["target_coin"])
-                         ]
-vol_results.to_csv("granger_vol_pairs.csv", index=False)
-
+sig_results.to_csv("grangerSig.csv", index=False)
